@@ -6,7 +6,7 @@ import {
   baseWatch,
   onEffectCleanup,
   ref,
-} from '../src/index'
+} from '../src'
 
 const queue: SchedulerJob[] = []
 
@@ -15,7 +15,7 @@ let isFlushPending = false
 const resolvedPromise = /*#__PURE__*/ Promise.resolve() as Promise<any>
 const nextTick = (fn?: () => any) =>
   fn ? resolvedPromise.then(fn) : resolvedPromise
-const scheduler: Scheduler = ({ job }) => {
+const scheduler: Scheduler = job => {
   queue.push(job)
   flushJobs()
 }

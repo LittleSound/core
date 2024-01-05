@@ -8,9 +8,9 @@ import {
   getCurrentScope,
 } from '@vue/reactivity'
 import {
-  type SchedulerJob,
-  usePreScheduler,
-  useSyncScheduler,
+  type SchedulerFactory,
+  createPreScheduler,
+  createSyncScheduler,
 } from './scheduler'
 import {
   EMPTY_OBJ,
@@ -28,7 +28,7 @@ import {
   unsetCurrentInstance,
 } from './component'
 import { handleError as handleErrorWithInstance } from './errorHandling'
-import { usePostRenderScheduler } from './renderer'
+import { createPostRenderScheduler } from './renderer'
 import { warn } from './warning'
 import type { ObjectWatchOptionItem } from './componentOptions'
 import { useSSRContext } from './helpers/useSsrContext'
@@ -156,17 +156,15 @@ export function watch<T = any, Immediate extends Readonly<boolean> = false>(
   return doWatch(source as any, cb, options)
 }
 
-function getSchedulerByFlushMode(
-  flush: WatchOptionsBase['flush'],
-): SchedulerJob {
+function getScheduler(flush: WatchOptionsBase['flush']): SchedulerFactory {
   if (flush === 'post') {
-    return usePostRenderScheduler
+    return createPostRenderScheduler
   }
   if (flush === 'sync') {
-    return useSyncScheduler
+    return createSyncScheduler
   }
   // default: 'pre'
-  return usePreScheduler
+  return createPreScheduler
 }
 
 function doWatch(
@@ -224,12 +222,9 @@ function doWatch(
   }
 
   const instance = currentInstance
-
   extendOptions.onError = (err: unknown, type: BaseWatchErrorCodes) =>
     handleErrorWithInstance(err, instance, type)
-
-  const scheduler = getSchedulerByFlushMode(flush)({ instance })
-  extendOptions.scheduler = scheduler
+  extendOptions.scheduler = getScheduler(flush)(instance)
 
   let effect = baseWatch(source, cb, extend({}, options, extendOptions))
 
