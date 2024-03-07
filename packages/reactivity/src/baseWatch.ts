@@ -15,7 +15,7 @@ import type { ComputedRef } from './computed'
 import { ReactiveFlags } from './constants'
 import {
   type DebuggerOptions,
-  type EffectScheduler,
+  EffectFlags,
   ReactiveEffect,
   pauseTracking,
   resetTracking,
@@ -33,12 +33,9 @@ export enum BaseWatchErrorCodes {
   WATCH_CLEANUP,
 }
 
-// TODO move to a scheduler package
-export interface SchedulerJob extends Function {
-  id?: number
-  pre?: boolean
-  active?: boolean
-  computed?: boolean
+export enum SchedulerJobFlags {
+  QUEUED = 1 << 0,
+  PRE = 1 << 1,
   /**
    * Indicates whether the effect is allowed to recursively trigger itself
    * when managed by the scheduler.
@@ -54,7 +51,18 @@ export interface SchedulerJob extends Function {
    * responsibility to perform recursive state mutation that eventually
    * stabilizes (#1727).
    */
-  allowRecurse?: boolean
+  ALLOW_RECURSE = 1 << 2,
+  DISPOSED = 1 << 3,
+}
+
+// TODO move to a scheduler package
+export interface SchedulerJob extends Function {
+  id?: number
+  /**
+   * flags can technically be undefined, but it can still be used in bitwise
+   * operations just like 0.
+   */
+  flags?: SchedulerJobFlags
 }
 
 type WatchEffect = (onCleanup: OnCleanup) => void
@@ -257,8 +265,11 @@ export function baseWatch(
   let oldValue: any = isMultiSource
     ? new Array((source as []).length).fill(INITIAL_WATCHER_VALUE)
     : INITIAL_WATCHER_VALUE
-  const job: SchedulerJob = () => {
-    if (!effect.active || !effect.dirty) {
+  const job: SchedulerJob = (immediateFirstRun?: boolean) => {
+    if (
+      !(effect.flags & EffectFlags.ACTIVE) ||
+      (!effect.dirty && !immediateFirstRun)
+    ) {
       return
     }
     if (cb) {
@@ -313,11 +324,10 @@ export function baseWatch(
 
   // important: mark the job as a watcher callback so that scheduler knows
   // it is allowed to self-trigger (#1727)
-  job.allowRecurse = !!cb
+  if (cb) job.flags! |= SchedulerJobFlags.ALLOW_RECURSE
 
-  let effectScheduler: EffectScheduler = () => scheduler(job, effect, false)
-
-  effect = new ReactiveEffect(getter, NOOP, effectScheduler)
+  effect = new ReactiveEffect(getter)
+  effect.scheduler = () => scheduler(job, effect, false)
 
   cleanup = effect.onStop = () => {
     const cleanups = cleanupMap.get(effect)
@@ -341,7 +351,7 @@ export function baseWatch(
   // initial run
   if (cb) {
     if (immediate) {
-      job()
+      job(true)
     } else {
       oldValue = effect.run()
     }

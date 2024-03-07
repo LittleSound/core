@@ -5,7 +5,6 @@ import {
   defineComponent,
   getCurrentInstance,
   nextTick,
-  onEffectCleanup,
   reactive,
   ref,
   watch,
@@ -24,6 +23,7 @@ import {
 } from '@vue/runtime-test'
 import {
   type DebuggerEvent,
+  EffectFlags,
   ITERATE_KEY,
   type Ref,
   type ShallowRef,
@@ -392,35 +392,6 @@ describe('api: watch', () => {
 
     stop()
     expect(cleanup).toHaveBeenCalledTimes(2)
-  })
-
-  it('onEffectCleanup', async () => {
-    const count = ref(0)
-    const cleanupEffect = vi.fn()
-    const cleanupWatch = vi.fn()
-
-    const stopEffect = watchEffect(() => {
-      onEffectCleanup(cleanupEffect)
-      count.value
-    })
-    const stopWatch = watch(count, () => {
-      onEffectCleanup(cleanupWatch)
-    })
-
-    count.value++
-    await nextTick()
-    expect(cleanupEffect).toHaveBeenCalledTimes(1)
-    expect(cleanupWatch).toHaveBeenCalledTimes(0)
-
-    count.value++
-    await nextTick()
-    expect(cleanupEffect).toHaveBeenCalledTimes(2)
-    expect(cleanupWatch).toHaveBeenCalledTimes(1)
-
-    stopEffect()
-    expect(cleanupEffect).toHaveBeenCalledTimes(3)
-    stopWatch()
-    expect(cleanupWatch).toHaveBeenCalledTimes(2)
   })
 
   it('flush timing: pre (default)', async () => {
@@ -1215,7 +1186,7 @@ describe('api: watch', () => {
     await nextTick()
     await nextTick()
 
-    expect(instance!.scope.effects[0].active).toBe(false)
+    expect(instance!.scope.effects[0].flags & EffectFlags.ACTIVE).toBeFalsy()
   })
 
   test('this.$watch should pass `this.proxy` to watch source as the first argument ', () => {
@@ -1503,5 +1474,47 @@ describe('api: watch', () => {
     expect(scope.effects.length).toBe(1)
     unwatch!()
     expect(scope.effects.length).toBe(0)
+  })
+
+  // simplified case of VueUse syncRef
+  test('sync watcher should not be batched', () => {
+    const a = ref(0)
+    const b = ref(0)
+    let pauseB = false
+    watch(
+      a,
+      () => {
+        pauseB = true
+        b.value = a.value + 1
+        pauseB = false
+      },
+      { flush: 'sync' },
+    )
+    watch(
+      b,
+      () => {
+        if (!pauseB) {
+          throw new Error('should not be called')
+        }
+      },
+      { flush: 'sync' },
+    )
+
+    a.value = 1
+    expect(b.value).toBe(2)
+  })
+
+  test('watchEffect should not fire on computed deps that did not change', async () => {
+    const a = ref(0)
+    const c = computed(() => a.value % 2)
+    const spy = vi.fn()
+    watchEffect(() => {
+      spy()
+      c.value
+    })
+    expect(spy).toHaveBeenCalledTimes(1)
+    a.value += 2
+    await nextTick()
+    expect(spy).toHaveBeenCalledTimes(1)
   })
 })

@@ -22,7 +22,7 @@ import {
   watch,
   watchEffect,
 } from '@vue/runtime-test'
-import { createApp, defineComponent } from 'vue'
+import { computed, createApp, defineComponent, inject, provide } from 'vue'
 import type { RawSlots } from 'packages/runtime-core/src/componentSlots'
 import { resetSuspenseId } from '../../src/components/Suspense'
 
@@ -1039,6 +1039,99 @@ describe('Suspense', () => {
     expect(serializeInner(root)).toBe(`<div>foo<div>foo nested</div></div>`)
   })
 
+  // #10098
+  test('switching branches w/ nested suspense', async () => {
+    const RouterView = {
+      setup(_: any, { slots }: any) {
+        const route = inject('route') as any
+        const depth = inject('depth', 0)
+        provide('depth', depth + 1)
+        return () => {
+          const current = route.value[depth]
+          return slots.default({ Component: current })[0]
+        }
+      },
+    }
+
+    const OuterB = defineAsyncComponent({
+      setup: () => {
+        return () =>
+          h(RouterView, null, {
+            default: ({ Component }: any) => [
+              h(Suspense, null, {
+                default: () => h(Component),
+              }),
+            ],
+          })
+      },
+    })
+
+    const InnerB = defineAsyncComponent({
+      setup: () => {
+        return () => h('div', 'innerB')
+      },
+    })
+
+    const OuterA = defineAsyncComponent({
+      setup: () => {
+        return () =>
+          h(RouterView, null, {
+            default: ({ Component }: any) => [
+              h(Suspense, null, {
+                default: () => h(Component),
+              }),
+            ],
+          })
+      },
+    })
+
+    const InnerA = defineAsyncComponent({
+      setup: () => {
+        return () => h('div', 'innerA')
+      },
+    })
+
+    const toggle = ref(true)
+    const route = computed(() => {
+      return toggle.value ? [OuterA, InnerA] : [OuterB, InnerB]
+    })
+
+    const Comp = {
+      setup() {
+        provide('route', route)
+        return () =>
+          h(RouterView, null, {
+            default: ({ Component }: any) => [
+              h(Suspense, null, {
+                default: () => h(Component),
+              }),
+            ],
+          })
+      },
+    }
+
+    const root = nodeOps.createElement('div')
+    render(h(Comp), root)
+    await Promise.all(deps)
+    await nextTick()
+    expect(serializeInner(root)).toBe(`<!---->`)
+
+    await Promise.all(deps)
+    await nextTick()
+    expect(serializeInner(root)).toBe(`<div>innerA</div>`)
+
+    deps.length = 0
+
+    toggle.value = false
+    await nextTick()
+    // toggle again
+    toggle.value = true
+
+    await Promise.all(deps)
+    await nextTick()
+    expect(serializeInner(root)).toBe(`<div>innerA</div>`)
+  })
+
   test('branch switch to 3rd branch before resolve', async () => {
     const calls: string[] = []
 
@@ -1641,6 +1734,141 @@ describe('Suspense', () => {
     expect(serializeInner(root)).toBe(expected)
   })
 
+  //#8678
+  test('nested suspense (child suspense update before parent suspense resolve)', async () => {
+    const calls: string[] = []
+
+    const InnerA = defineAsyncComponent(
+      {
+        setup: () => {
+          calls.push('innerA created')
+          onMounted(() => {
+            calls.push('innerA mounted')
+          })
+          return () => h('div', 'innerA')
+        },
+      },
+      10,
+    )
+
+    const InnerB = defineAsyncComponent(
+      {
+        setup: () => {
+          calls.push('innerB created')
+          onMounted(() => {
+            calls.push('innerB mounted')
+          })
+          return () => h('div', 'innerB')
+        },
+      },
+      10,
+    )
+
+    const OuterA = defineAsyncComponent(
+      {
+        setup: (_, { slots }: any) => {
+          calls.push('outerA created')
+          onMounted(() => {
+            calls.push('outerA mounted')
+          })
+          return () =>
+            h(Fragment, null, [h('div', 'outerA'), slots.default?.()])
+        },
+      },
+      5,
+    )
+
+    const OuterB = defineAsyncComponent(
+      {
+        setup: (_, { slots }: any) => {
+          calls.push('outerB created')
+          onMounted(() => {
+            calls.push('outerB mounted')
+          })
+          return () =>
+            h(Fragment, null, [h('div', 'outerB'), slots.default?.()])
+        },
+      },
+      5,
+    )
+
+    const outerToggle = ref(false)
+    const innerToggle = ref(false)
+
+    /**
+     *  <Suspense>
+     *    <component :is="outerToggle ? outerB : outerA">
+     *      <Suspense>
+     *        <component :is="innerToggle ? innerB : innerA" />
+     *      </Suspense>
+     *    </component>
+     *  </Suspense>
+     */
+    const Comp = {
+      setup() {
+        return () =>
+          h(Suspense, null, {
+            default: [
+              h(outerToggle.value ? OuterB : OuterA, null, {
+                default: () =>
+                  h(Suspense, null, {
+                    default: h(innerToggle.value ? InnerB : InnerA),
+                  }),
+              }),
+            ],
+            fallback: h('div', 'fallback outer'),
+          })
+      },
+    }
+
+    const root = nodeOps.createElement('div')
+    render(h(Comp), root)
+    expect(serializeInner(root)).toBe(`<div>fallback outer</div>`)
+
+    // mount outer component
+    await Promise.all(deps)
+    await nextTick()
+
+    expect(serializeInner(root)).toBe(`<div>outerA</div><!---->`)
+    expect(calls).toEqual([`outerA created`, `outerA mounted`])
+
+    // mount inner component
+    await Promise.all(deps)
+    await nextTick()
+    expect(serializeInner(root)).toBe(`<div>outerA</div><div>innerA</div>`)
+
+    expect(calls).toEqual([
+      'outerA created',
+      'outerA mounted',
+      'innerA created',
+      'innerA mounted',
+    ])
+
+    calls.length = 0
+    deps.length = 0
+
+    // toggle both outer and inner components
+    outerToggle.value = true
+    innerToggle.value = true
+    await nextTick()
+
+    await Promise.all(deps)
+    await nextTick()
+    expect(serializeInner(root)).toBe(`<div>outerB</div><!---->`)
+
+    await Promise.all(deps)
+    await nextTick()
+    expect(serializeInner(root)).toBe(`<div>outerB</div><div>innerB</div>`)
+
+    // innerB only mount once
+    expect(calls).toEqual([
+      'outerB created',
+      'outerB mounted',
+      'innerB created',
+      'innerB mounted',
+    ])
+  })
+
   // #6416
   test('KeepAlive with Suspense', async () => {
     const Async = defineAsyncComponent({
@@ -1692,7 +1920,7 @@ describe('Suspense', () => {
     expect(serializeInner(root)).toBe(`<div>sync</div>`)
   })
 
-  // #6416 follow up
+  // #6416 follow up / #10017
   test('Suspense patched during HOC async component re-mount', async () => {
     const key = ref('k')
     const data = ref('data')
@@ -1713,7 +1941,7 @@ describe('Suspense', () => {
     const App = {
       render() {
         return h(Suspense, null, {
-          default: h(Comp, { data: data.value }),
+          default: h(Comp, { k: key.value, data: data.value }),
         })
       },
     }

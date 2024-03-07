@@ -107,7 +107,7 @@ export function renderComponentVNode(
           ),
         )
         // Note: error display is already done by the wrapped lifecycle hook function.
-        .catch(() => {})
+        .catch(NOOP)
     }
     return p.then(() => renderComponentSubTree(instance, slotScopeId))
   } else {
@@ -141,15 +141,6 @@ function renderComponentSubTree(
       isString(comp.template)
     ) {
       comp.ssrRender = ssrCompile(comp.template, instance)
-    }
-
-    // perf: enable caching of computed getters during render
-    // since there cannot be state mutations during render.
-    for (const e of instance.scope.effects) {
-      if (e.computed) {
-        e.computed._dirty = true
-        e.computed._cacheable = true
-      }
     }
 
     const ssrRender = instance.ssrRender || comp.ssrRender

@@ -4,9 +4,9 @@ import {
   EffectScope,
   type Ref,
   baseWatch,
-  onEffectCleanup,
   ref,
 } from '../src'
+import { onEffectCleanup } from '../src/effect'
 
 const queue: SchedulerJob[] = []
 
