@@ -79,7 +79,6 @@ export interface BaseWatchOptions<Immediate = boolean> extends DebuggerOptions {
   deep?: boolean
   once?: boolean
   scheduler?: Scheduler
-  middleware?: BaseWatchMiddleware
   onError?: HandleError
   onWarn?: HandleWarn
 }
@@ -92,7 +91,6 @@ export type Scheduler = (
   effect: ReactiveEffect,
   isInit: boolean,
 ) => void
-export type BaseWatchMiddleware = (next: () => unknown) => any
 export type HandleError = (err: unknown, type: BaseWatchErrorCodes) => void
 export type HandleWarn = (msg: string, ...args: any[]) => void
 
@@ -102,13 +100,13 @@ const DEFAULT_HANDLE_ERROR: HandleError = (err: unknown) => {
 }
 
 const cleanupMap: WeakMap<ReactiveEffect, (() => void)[]> = new WeakMap()
-let activeEffect: ReactiveEffect | undefined = undefined
+let activeWatcher: ReactiveEffect | undefined = undefined
 
 /**
  * Returns the current active effect if there is one.
  */
-export function getCurrentEffect() {
-  return activeEffect
+export function getCurrentWatcher() {
+  return activeWatcher
 }
 
 /**
@@ -118,15 +116,15 @@ export function getCurrentEffect() {
  *
  * @param cleanupFn - The callback function to attach to the effect's cleanup.
  */
-export function onEffectCleanup(cleanupFn: () => void) {
-  if (activeEffect) {
+export function onWatcherCleanup(cleanupFn: () => void, failSilently = false) {
+  if (activeWatcher) {
     const cleanups =
-      cleanupMap.get(activeEffect) ||
-      cleanupMap.set(activeEffect, []).get(activeEffect)!
+      cleanupMap.get(activeWatcher) ||
+      cleanupMap.set(activeWatcher, []).get(activeWatcher)!
     cleanups.push(cleanupFn)
-  } else if (__DEV__) {
+  } else if (__DEV__ && !failSilently) {
     warn(
-      `onEffectCleanup() was called when there was no active effect` +
+      `onWatcherCleanup() was called when there was no active watcher` +
         ` to associate with.`,
     )
   }
@@ -142,7 +140,6 @@ export function baseWatch(
     scheduler = DEFAULT_SCHEDULER,
     onWarn = __DEV__ ? warn : NOOP,
     onError = DEFAULT_HANDLE_ERROR,
-    middleware,
     onTrack,
     onTrigger,
   }: BaseWatchOptions = EMPTY_OBJ,
@@ -209,22 +206,18 @@ export function baseWatch(
             resetTracking()
           }
         }
-        const currentEffect = activeEffect
-        activeEffect = effect
+        const currentEffect = activeWatcher
+        activeWatcher = effect
         try {
           return callWithAsyncErrorHandling(
             source,
             onError,
             BaseWatchErrorCodes.WATCH_CALLBACK,
-            [onEffectCleanup],
+            [onWatcherCleanup],
           )
         } finally {
-          activeEffect = currentEffect
+          activeWatcher = currentEffect
         }
-      }
-      if (middleware) {
-        const baseGetter = getter
-        getter = () => middleware(baseGetter)
       }
     }
   } else {
@@ -239,19 +232,19 @@ export function baseWatch(
 
   if (once) {
     if (!cb) {
-      // onEffectCleanup need use effect as a key
+      // onWatcherCleanup need use effect as a key
       getCurrentScope()?.effects.push((effect = {} as any))
       getter()
       return
     }
     if (immediate) {
-      // onEffectCleanup need use effect as a key
+      // onWatcherCleanup need use effect as a key
       getCurrentScope()?.effects.push((effect = {} as any))
       callWithAsyncErrorHandling(
         cb,
         onError,
         BaseWatchErrorCodes.WATCH_CALLBACK,
-        [getter(), isMultiSource ? [] : undefined, onEffectCleanup],
+        [getter(), isMultiSource ? [] : undefined, onWatcherCleanup],
       )
       return
     }
@@ -282,38 +275,31 @@ export function baseWatch(
           ? (newValue as any[]).some((v, i) => hasChanged(v, oldValue[i]))
           : hasChanged(newValue, oldValue))
       ) {
-        const next = () => {
-          // cleanup before running cb again
-          if (cleanup) {
-            cleanup()
-          }
-          const currentEffect = activeEffect
-          activeEffect = effect
-          try {
-            callWithAsyncErrorHandling(
-              cb!,
-              onError,
-              BaseWatchErrorCodes.WATCH_CALLBACK,
-              [
-                newValue,
-                // pass undefined as the old value when it's changed for the first time
-                oldValue === INITIAL_WATCHER_VALUE
-                  ? undefined
-                  : isMultiSource && oldValue[0] === INITIAL_WATCHER_VALUE
-                    ? []
-                    : oldValue,
-                onEffectCleanup,
-              ],
-            )
-            oldValue = newValue
-          } finally {
-            activeEffect = currentEffect
-          }
+        // cleanup before running cb again
+        if (cleanup) {
+          cleanup()
         }
-        if (middleware) {
-          middleware(next)
-        } else {
-          next()
+        const currentWatcher = activeWatcher
+        activeWatcher = effect
+        try {
+          callWithAsyncErrorHandling(
+            cb!,
+            onError,
+            BaseWatchErrorCodes.WATCH_CALLBACK,
+            [
+              newValue,
+              // pass undefined as the old value when it's changed for the first time
+              oldValue === INITIAL_WATCHER_VALUE
+                ? undefined
+                : isMultiSource && oldValue[0] === INITIAL_WATCHER_VALUE
+                  ? []
+                  : oldValue,
+              onWatcherCleanup,
+            ],
+          )
+          oldValue = newValue
+        } finally {
+          activeWatcher = currentWatcher
         }
       }
     } else {

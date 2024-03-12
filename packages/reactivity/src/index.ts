@@ -79,10 +79,10 @@ export { reactiveReadArray, shallowReadArray } from './arrayInstrumentations'
 export { TrackOpTypes, TriggerOpTypes, ReactiveFlags } from './constants'
 export {
   baseWatch,
-  getCurrentEffect,
+  getCurrentWatcher as getCurrentEffect,
   traverse,
+  onWatcherCleanup,
   BaseWatchErrorCodes,
   type BaseWatchOptions,
-  type BaseWatchMiddleware,
   type Scheduler,
 } from './baseWatch'
