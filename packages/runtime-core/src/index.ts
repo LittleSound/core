@@ -28,6 +28,7 @@ export {
   // effect
   effect,
   stop,
+  onWatcherCleanup,
   ReactiveEffect,
   // effect scope
   effectScope,
