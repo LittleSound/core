@@ -15,9 +15,13 @@ let isFlushPending = false
 const resolvedPromise = /*#__PURE__*/ Promise.resolve() as Promise<any>
 const nextTick = (fn?: () => any) =>
   fn ? resolvedPromise.then(fn) : resolvedPromise
-const scheduler: Scheduler = job => {
-  queue.push(job)
-  flushJobs()
+const scheduler: Scheduler = (job, effect, immediateFirstRun, hasCb) => {
+  if (immediateFirstRun) {
+    !hasCb && effect.run()
+  } else {
+    queue.push(() => job(immediateFirstRun))
+    flushJobs()
+  }
 }
 const flushJobs = () => {
   if (isFlushPending) return

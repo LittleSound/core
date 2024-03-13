@@ -304,22 +304,22 @@ export type SchedulerFactory = (
 ) => Scheduler
 
 export const createSyncScheduler: SchedulerFactory =
-  instance => (job, effect, isInit) => {
-    if (isInit) {
+  instance => (job, effect, immediateFirstRun, hasCb) => {
+    if (immediateFirstRun) {
       effect.flags |= EffectFlags.NO_BATCH
-      effect.run()
+      if (!hasCb) effect.run()
     } else {
       job()
     }
   }
 
 export const createPreScheduler: SchedulerFactory =
-  instance => (job, effect, isInit) => {
-    if (isInit) {
-      effect.run()
-    } else {
+  instance => (job, effect, immediateFirstRun, hasCb) => {
+    if (!immediateFirstRun) {
       job.flags! |= SchedulerJobFlags.PRE
       if (instance) job.id = instance.uid
       queueJob(job)
+    } else if (!hasCb) {
+      effect.run()
     }
   }

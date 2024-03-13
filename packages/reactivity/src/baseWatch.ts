@@ -33,7 +33,8 @@ export enum BaseWatchErrorCodes {
   WATCH_CLEANUP,
 }
 
-export enum SchedulerJobFlags {
+// TODO move to a scheduler package
+enum SchedulerJobFlags {
   QUEUED = 1 << 0,
   PRE = 1 << 1,
   /**
@@ -89,12 +90,24 @@ const INITIAL_WATCHER_VALUE = {}
 export type Scheduler = (
   job: SchedulerJob,
   effect: ReactiveEffect,
-  isInit: boolean,
+  immediateFirstRun: boolean,
+  hasCb: boolean,
 ) => void
 export type HandleError = (err: unknown, type: BaseWatchErrorCodes) => void
 export type HandleWarn = (msg: string, ...args: any[]) => void
 
-const DEFAULT_SCHEDULER: Scheduler = job => job()
+const DEFAULT_SCHEDULER: Scheduler = (
+  job,
+  effect,
+  immediateFirstRun,
+  hasCb,
+) => {
+  if (immediateFirstRun) {
+    !hasCb && effect.run()
+  } else {
+    job()
+  }
+}
 const DEFAULT_HANDLE_ERROR: HandleError = (err: unknown) => {
   throw err
 }
@@ -313,7 +326,7 @@ export function baseWatch(
   if (cb) job.flags! |= SchedulerJobFlags.ALLOW_RECURSE
 
   effect = new ReactiveEffect(getter)
-  effect.scheduler = () => scheduler(job, effect, false)
+  effect.scheduler = () => scheduler(job, effect, false, !!cb)
 
   cleanup = effect.onStop = () => {
     const cleanups = cleanupMap.get(effect)
@@ -336,13 +349,14 @@ export function baseWatch(
 
   // initial run
   if (cb) {
+    scheduler(job, effect, true, !!cb)
     if (immediate) {
       job(true)
     } else {
       oldValue = effect.run()
     }
   } else {
-    scheduler(job, effect, true)
+    scheduler(job, effect, true, !!cb)
   }
 
   return effect
