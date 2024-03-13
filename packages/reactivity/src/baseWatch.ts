@@ -22,7 +22,6 @@ import {
 } from './effect'
 import { isReactive, isShallow } from './reactive'
 import { type Ref, isRef } from './ref'
-import { getCurrentScope } from './effectScope'
 
 // These errors were transferred from `packages/runtime-core/src/errorHandling.ts`
 // along with baseWatch to maintain code compatibility. Hence,
@@ -244,27 +243,18 @@ export function baseWatch(
   }
 
   if (once) {
-    if (!cb) {
-      // onWatcherCleanup need use effect as a key
-      getCurrentScope()?.effects.push((effect = {} as any))
-      getter()
-      return
-    }
-    if (immediate) {
-      // onWatcherCleanup need use effect as a key
-      getCurrentScope()?.effects.push((effect = {} as any))
-      callWithAsyncErrorHandling(
-        cb,
-        onError,
-        BaseWatchErrorCodes.WATCH_CALLBACK,
-        [getter(), isMultiSource ? [] : undefined, onWatcherCleanup],
-      )
-      return
-    }
-    const _cb = cb
-    cb = (...args) => {
-      _cb(...args)
-      effect?.stop()
+    if (cb) {
+      const _cb = cb
+      cb = (...args) => {
+        _cb(...args)
+        effect?.stop()
+      }
+    } else {
+      const _getter = getter
+      getter = () => {
+        _getter()
+        effect?.stop()
+      }
     }
   }
 
