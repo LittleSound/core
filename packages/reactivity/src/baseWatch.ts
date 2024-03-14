@@ -22,6 +22,7 @@ import {
 } from './effect'
 import { isReactive, isShallow } from './reactive'
 import { type Ref, isRef } from './ref'
+import { type SchedulerJob, SchedulerJobFlags } from './scheduler'
 
 // These errors were transferred from `packages/runtime-core/src/errorHandling.ts`
 // along with baseWatch to maintain code compatibility. Hence,
@@ -30,39 +31,6 @@ export enum BaseWatchErrorCodes {
   WATCH_GETTER = 2,
   WATCH_CALLBACK,
   WATCH_CLEANUP,
-}
-
-// TODO move to a scheduler package
-enum SchedulerJobFlags {
-  QUEUED = 1 << 0,
-  PRE = 1 << 1,
-  /**
-   * Indicates whether the effect is allowed to recursively trigger itself
-   * when managed by the scheduler.
-   *
-   * By default, a job cannot trigger itself because some built-in method calls,
-   * e.g. Array.prototype.push actually performs reads as well (#1740) which
-   * can lead to confusing infinite loops.
-   * The allowed cases are component update functions and watch callbacks.
-   * Component update functions may update child component props, which in turn
-   * trigger flush: "pre" watch callbacks that mutates state that the parent
-   * relies on (#1801). Watch callbacks doesn't track its dependencies so if it
-   * triggers itself again, it's likely intentional and it is the user's
-   * responsibility to perform recursive state mutation that eventually
-   * stabilizes (#1727).
-   */
-  ALLOW_RECURSE = 1 << 2,
-  DISPOSED = 1 << 3,
-}
-
-// TODO move to a scheduler package
-export interface SchedulerJob extends Function {
-  id?: number
-  /**
-   * flags can technically be undefined, but it can still be used in bitwise
-   * operations just like 0.
-   */
-  flags?: SchedulerJobFlags
 }
 
 type WatchEffect = (onCleanup: OnCleanup) => void
@@ -78,7 +46,7 @@ export interface BaseWatchOptions<Immediate = boolean> extends DebuggerOptions {
   immediate?: Immediate
   deep?: boolean
   once?: boolean
-  scheduler?: Scheduler
+  scheduler?: WatchScheduler
   onError?: HandleError
   onWarn?: HandleWarn
 }
@@ -86,7 +54,7 @@ export interface BaseWatchOptions<Immediate = boolean> extends DebuggerOptions {
 // initial value for watchers to trigger on undefined initial values
 const INITIAL_WATCHER_VALUE = {}
 
-export type Scheduler = (
+export type WatchScheduler = (
   job: SchedulerJob,
   effect: ReactiveEffect,
   immediateFirstRun: boolean,
@@ -95,7 +63,7 @@ export type Scheduler = (
 export type HandleError = (err: unknown, type: BaseWatchErrorCodes) => void
 export type HandleWarn = (msg: string, ...args: any[]) => void
 
-const DEFAULT_SCHEDULER: Scheduler = (
+const DEFAULT_SCHEDULER: WatchScheduler = (
   job,
   effect,
   immediateFirstRun,

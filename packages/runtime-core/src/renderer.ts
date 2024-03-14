@@ -40,7 +40,6 @@ import {
 import {
   type SchedulerFactory,
   type SchedulerJob,
-  SchedulerJobFlags,
   flushPostFlushCbs,
   flushPreFlushCbs,
   invalidateJob,
@@ -50,6 +49,7 @@ import {
 import {
   EffectFlags,
   ReactiveEffect,
+  SchedulerJobFlags,
   pauseTracking,
   resetTracking,
 } from '@vue/reactivity'

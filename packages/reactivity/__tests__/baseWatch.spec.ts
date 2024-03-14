@@ -1,8 +1,9 @@
-import type { Scheduler, SchedulerJob } from '../src/baseWatch'
 import {
   BaseWatchErrorCodes,
   EffectScope,
   type Ref,
+  type SchedulerJob,
+  type WatchScheduler,
   baseWatch,
   onWatcherCleanup,
   ref,
@@ -15,7 +16,7 @@ let isFlushPending = false
 const resolvedPromise = /*#__PURE__*/ Promise.resolve() as Promise<any>
 const nextTick = (fn?: () => any) =>
   fn ? resolvedPromise.then(fn) : resolvedPromise
-const scheduler: Scheduler = (job, effect, immediateFirstRun, hasCb) => {
+const scheduler: WatchScheduler = (job, effect, immediateFirstRun, hasCb) => {
   if (immediateFirstRun) {
     !hasCb && effect.run()
   } else {
